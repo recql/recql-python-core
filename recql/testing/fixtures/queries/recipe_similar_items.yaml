@@ -1,0 +1,12 @@
+# Recipe: similar items (OpenAPI-aligned; embedding_ref als)
+type: rank
+from: item
+retrieve:
+  - type: similarity
+    embedding_ref: als
+    query_encoder:
+      type: precomputed_item
+      input_item_id: $parameter.item_id
+    name: similar
+    limit: 20
+limit: 10

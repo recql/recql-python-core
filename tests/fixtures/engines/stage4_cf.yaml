@@ -1,0 +1,26 @@
+version: v2
+name: collaborative_filtering_engine
+data:
+  item_table:
+    name: items
+    type: table
+  interaction_table:
+    name: interactions
+    type: table
+index:
+  embeddings:
+    - name: content_embedding
+      encoder:
+        type: hugging_face
+        model_name: sentence-transformers/all-MiniLM-L6-v2
+        item_fields:
+          - movie_title
+          - description
+    - name: als
+      encoder:
+        type: trained_model
+        model_ref: als
+training:
+  models:
+    - name: als
+      policy_type: als

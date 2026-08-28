@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "recql"
+version = "0.1.0"
+description = "RecQL — Recommender Query Language core (storage-agnostic)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+  "msgspec>=0.18",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+ranking = ["lightgbm>=4.0", "numpy>=1.26"]
+encode = ["sentence-transformers>=3.0", "torch>=2.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "numpy>=1.26"]
+conformance = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.urls]
+Homepage = "https://github.com/recql/recql-python-core"
+Repository = "https://github.com/recql/recql-python-core"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["recql*"]
+
+[tool.setuptools.package-data]
+recql = ["testing/fixtures/queries/*", "testing/fixtures/engines/*", "testing/fixtures/ann_corpus.json"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+# Do not collect the shared conformance suite here — backend packs run it via
+# `pytest --pyargs recql.testing.conformance` after providing recql_testbed.
+norecursedirs = ["recql/testing/conformance"]

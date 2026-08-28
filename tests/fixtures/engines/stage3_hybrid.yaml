@@ -1,0 +1,21 @@
+version: v2
+name: hybrid_search_engine
+data:
+  item_table:
+    name: items
+    type: table
+index:
+  embeddings:
+    - name: content_embedding
+      encoder:
+        type: hugging_face
+        model_name: sentence-transformers/all-MiniLM-L6-v2
+        item_fields:
+          - movie_title
+          - description
+  lexical_search:
+    item_fields:
+      - movie_title
+      - description
+      - cast
+      - genres

@@ -1,0 +1,27 @@
+# Recipe: personalized feed (OpenAPI form; MovieLens user 55)
+type: rank
+from: item
+retrieve:
+  - type: similarity
+    embedding_ref: als
+    query_encoder:
+      type: precomputed_user
+      input_user_id: $parameter.user_id
+    name: user_vector
+    limit: 50
+  - type: column_order
+    columns:
+      - name: _derived_popular_rank
+        ascending: true
+    name: cold_start
+    limit: 50
+filter:
+  - type: prebuilt
+    filter_ref: exclude_seen
+    input_user_id: $parameter.user_id
+score:
+  type: score_ensemble
+  value_model: retrieval.get_score("user_vector", 0)
+  output_alias: ctr
+  preserve_order: false
+limit: 10

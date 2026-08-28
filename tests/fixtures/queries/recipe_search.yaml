@@ -1,0 +1,12 @@
+# Recipe: search (vector text_search)
+type: rank
+from: item
+retrieve:
+  - type: text_search
+    input_text_query: $parameter.query_text
+    mode:
+      type: vector
+      text_embedding_ref: content_embedding
+    name: search
+    limit: 20
+limit: 10

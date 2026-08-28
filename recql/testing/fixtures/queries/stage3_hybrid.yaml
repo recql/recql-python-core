@@ -1,0 +1,17 @@
+type: rank
+from: item
+retrieve:
+  - type: text_search
+    input_text_query: space movies
+    mode:
+      type: lexical
+    name: lexical
+    limit: 50
+  - type: text_search
+    input_text_query: space movies
+    mode:
+      type: vector
+      text_embedding_ref: content_embedding
+    name: vector
+    limit: 50
+limit: 10
