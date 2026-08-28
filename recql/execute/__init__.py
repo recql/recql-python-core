@@ -115,7 +115,11 @@ async def _execute_inner(
             max_len = getattr(fstep, "max_length", 500)
             merged = merged[: int(max_len)]
         else:
-            merged = await plugin.apply(fstep, merged, {"params": params})
+            merged = await plugin.apply(
+                fstep,
+                merged,
+                {"params": params, "catalog": bound.catalog, "registry": registry},
+            )
 
     # Pagination exclusion
     if pagination_key and registry.kv is not None:
@@ -129,7 +133,11 @@ async def _execute_inner(
         stype = getattr(score, "type", "score_ensemble")
         scorer = registry.scorers.get(str(stype))
         if scorer is not None:
-            scores = await scorer.score_many(score, merged, {"params": params})
+            scores = await scorer.score_many(
+                score,
+                merged,
+                {"params": params, "catalog": bound.catalog, "registry": registry},
+            )
             alias = getattr(score, "output_alias", None) or "score"
             for c, s in zip(merged, scores, strict=True):
                 c.attributes[alias] = s

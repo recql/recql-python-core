@@ -97,6 +97,7 @@ class ColumnOrderRetrieveStep(msgspec.Struct, frozen=True, forbid_unknown_fields
     where: str | None = None
     limit: int = 100
     name: str | None = None
+    backend: str | None = None
     type: Literal["column_order"] = "column_order"
 
 
@@ -106,6 +107,7 @@ class TextSearchRetrieveStep(msgspec.Struct, frozen=True, forbid_unknown_fields=
     where: str | None = None
     limit: int = 100
     name: str | None = None
+    backend: str | None = None
     type: Literal["text_search"] = "text_search"
 
 
@@ -115,6 +117,7 @@ class SimilarityRetrieveStep(msgspec.Struct, frozen=True, forbid_unknown_fields=
     where: str | None = None
     limit: int = 100
     name: str | None = None
+    backend: str | None = None
     type: Literal["similarity"] = "similarity"
     use_exact_search: bool = False
 
@@ -123,6 +126,7 @@ class FilterRetrieveStep(msgspec.Struct, frozen=True, forbid_unknown_fields=True
     where: str | None = None
     limit: int = 100
     name: str | None = None
+    backend: str | None = None
     type: Literal["filter"] = "filter"
 
 
@@ -131,6 +135,7 @@ class CandidateIdsRetrieveStep(msgspec.Struct, frozen=True, forbid_unknown_field
     item_ids: Any
     limit: int | None = None
     name: str | None = None
+    backend: str | None = None
     type: Literal["candidate_ids"] = "candidate_ids"
 
 
@@ -138,6 +143,7 @@ class CandidateAttributesRetrieveStep(msgspec.Struct, frozen=True, forbid_unknow
     item_attributes: Any  # list[dict] or parameter ref string
     limit: int | None = None
     name: str | None = None
+    backend: str | None = None
     type: Literal["candidate_attributes"] = "candidate_attributes"
 
 
@@ -165,6 +171,7 @@ class PrebuiltFilterStep(msgspec.Struct, frozen=True, forbid_unknown_fields=True
     name: str | None = None
     input_user_id: str | None = None
     input_item_id: str | None = None
+    backend: str | None = None
     type: Literal["prebuilt"] = "prebuilt"
 
 
@@ -198,6 +205,7 @@ class ScoreEnsemble(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
     name: str | None = None
     output_alias: str | None = None
     preserve_order: bool = False
+    backend: str | None = None
     type: Literal["score_ensemble"] = "score_ensemble"
 
 

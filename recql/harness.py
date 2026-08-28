@@ -35,7 +35,7 @@ async def recql(
     query: Any,
     params: dict[str, Any] | None = None,
     pagination_key: str | None = None,
-    backend: PluginRegistry | None = None,
+    backend: PluginRegistry | dict[str, PluginRegistry] | None = None,
     flags: FeatureFlags | None = None,
     timeout_s: float | None = None,
 ) -> ResultPage:
@@ -55,8 +55,17 @@ async def recql(
         cfg = query_input_to_rank_query_config(query)
 
     bound = bind(cfg, catalog, params=params or {})
-    if backend is not None:
+    if isinstance(backend, dict):
+        from recql.plugins.composite import CompositePluginRegistry
+
+        registry: PluginRegistry = CompositePluginRegistry(registries=backend)
+    elif backend is not None:
         registry = backend
+    elif catalog is not None and catalog.is_multi_backend():
+        from recql.plugins.composite import CompositePluginRegistry
+
+        sub_registries = {bname: mock_registry({}) for bname in catalog.backends}
+        registry = CompositePluginRegistry(registries=sub_registries)
     else:
         # In-process mock when no PluginRegistry is supplied (plan / unit paths).
         registry = mock_registry({})

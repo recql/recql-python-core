@@ -35,6 +35,7 @@ class EntityTableBinding:
     label_column: str | None = None
     schema_override: dict[str, Any] = field(default_factory=dict)
     queries: dict[str, str] = field(default_factory=dict)
+    backend: str | None = None
 
     def qualify(self, column: str) -> str:
         return f"{column}"
@@ -50,6 +51,7 @@ class EmbeddingStoreBinding:
     entity_id_column: str = "entity_id"
     vector_column: str = "embedding"
     queries: dict[str, str] = field(default_factory=dict)
+    backend: str | None = None
 
 
 @dataclass
@@ -58,6 +60,7 @@ class EmbeddingStoreGroup:
 
     user: EmbeddingStoreBinding | None = None
     item: EmbeddingStoreBinding | None = None
+    backend: str | None = None
 
     def binding_for(self, entity_type: str) -> EmbeddingStoreBinding:
         et = str(entity_type or "item").lower()
@@ -78,6 +81,7 @@ class ModelStoreBinding:
     name_column: str = "name"
     blob_column: str = "blob"
     feature_spec_column: str = "feature_spec"
+    backend: str | None = None
 
 
 @dataclass
@@ -90,6 +94,7 @@ class PaginationKvBinding:
     expires_at_column: str = "expires_at"
     # When True, plugin may CREATE TABLE IF NOT EXISTS on first use.
     ensure_table: bool = True
+    backend: str | None = None
 
 
 @dataclass
@@ -107,6 +112,7 @@ class PersonalFilterBinding:
     item_id_column: str = "item_id"
     filter_type: str = "personal_filter"
     queries: dict[str, str] = field(default_factory=dict)
+    backend: str | None = None
 
 
 @dataclass
@@ -148,6 +154,36 @@ class DataBindings:
             return self.embedding_stores[key].binding_for(entity_type)
         return self.embeddings
 
+    def backend_for_embedding(
+        self, embedding_name: str, entity_type: str = "item"
+    ) -> str | None:
+        if embedding_name in self.embedding_stores:
+            group = self.embedding_stores[embedding_name]
+            binding = group.binding_for(entity_type)
+            if binding and binding.backend:
+                return binding.backend
+            if group.backend:
+                return group.backend
+        key = self.embedding_store_map.get(embedding_name)
+        if key and key in self.embedding_stores:
+            group = self.embedding_stores[key]
+            binding = group.binding_for(entity_type)
+            if binding and binding.backend:
+                return binding.backend
+            if group.backend:
+                return group.backend
+        spec = self.embedding_specs.get(embedding_name)
+        if hasattr(spec, "backend") and spec.backend:
+            return spec.backend
+        if isinstance(spec, dict) and spec.get("backend"):
+            return str(spec["backend"])
+        return self.backend or None
+
+    def backend_for_lexical(self) -> str | None:
+        if self.lexical and hasattr(self.lexical, "backend") and self.lexical.backend:
+            return self.lexical.backend
+        return self.backend or None
+
 
 def _normalize_filter_ref(ref: str) -> str:
     """``ref:data.filters:exclude_seen`` / ``exclude_seen`` → ``exclude_seen``."""
@@ -175,24 +211,29 @@ def _embedding_store_from_config(cfg: dict[str, Any]) -> EmbeddingStoreBinding:
         entity_id_column=str(cfg.get("entity_id_column") or "entity_id"),
         vector_column=str(cfg.get("vector_column") or "embedding"),
         queries=_parse_queries_block(cfg.get("queries")),
+        backend=str(cfg["backend"]) if cfg.get("backend") else None,
     )
 
 
 def _embedding_store_group_from_config(cfg: dict[str, Any]) -> EmbeddingStoreGroup:
     """Parse ``user`` / ``item`` planes, or a legacy unified table definition."""
+    backend = str(cfg["backend"]) if cfg.get("backend") else None
     if "user" in cfg or "item" in cfg:
         user_cfg = cfg.get("user")
         item_cfg = cfg.get("item")
+        user_b = _embedding_store_from_config(user_cfg) if isinstance(user_cfg, dict) else None
+        if user_b and not user_b.backend and backend:
+            user_b.backend = backend
+        item_b = _embedding_store_from_config(item_cfg) if isinstance(item_cfg, dict) else None
+        if item_b and not item_b.backend and backend:
+            item_b.backend = backend
         return EmbeddingStoreGroup(
-            user=_embedding_store_from_config(user_cfg)
-            if isinstance(user_cfg, dict)
-            else None,
-            item=_embedding_store_from_config(item_cfg)
-            if isinstance(item_cfg, dict)
-            else None,
+            user=user_b,
+            item=item_b,
+            backend=backend,
         )
     unified = _embedding_store_from_config(cfg)
-    return EmbeddingStoreGroup(user=unified, item=unified)
+    return EmbeddingStoreGroup(user=unified, item=unified, backend=backend)
 
 
 def _table_or_query_from_config(cfg: dict[str, Any], *, default: str) -> str:
@@ -344,6 +385,10 @@ def bindings_from_catalog(catalog: Any | None) -> DataBindings:
         dep = getattr(catalog, "deployment", None) or {}
         raw_backend = dep.get("backend")
     if not raw_backend:
+        backends = getattr(catalog, "backends", {}) or {}
+        if backends:
+            raw_backend = next(iter(backends.values())).backend
+    if not raw_backend:
         raise ExecuteError(
             "plugins.backend is required in engine YAML (no default backend)"
         )
@@ -352,10 +397,17 @@ def bindings_from_catalog(catalog: Any | None) -> DataBindings:
     data = catalog.data or {}
     schema = data.get("schema_override") or {}
 
-    item_from, item_cfg = _table_from_config(data.get("item_table"), default_name="items")
-    user_from, user_cfg = _table_from_config(data.get("user_table"), default_name="users")
+    item_from, item_cfg = _table_from_config(
+        data.get("item_table") or data.get("items") or data.get("item"),
+        default_name="items",
+    )
+    user_from, user_cfg = _table_from_config(
+        data.get("user_table") or data.get("users") or data.get("user"),
+        default_name="users",
+    )
     inter_from, inter_cfg = _table_from_config(
-        data.get("interaction_table"), default_name="interactions"
+        data.get("interaction_table") or data.get("interactions") or data.get("interaction"),
+        default_name="interactions",
     )
 
     # Detect fixture-shaped vs wide tables via schema_override / explicit columns
@@ -385,6 +437,7 @@ def bindings_from_catalog(catalog: Any | None) -> DataBindings:
         ),
         schema_override=dict(schema.get("item") or {}),
         queries=_parse_queries_block(item_cfg.get("queries")),
+        backend=str(item_cfg["backend"]) if item_cfg.get("backend") else None,
     )
     # Optional Oracle-style search text column (not tsvector)
     if item_cfg.get("search_text_column"):
@@ -406,6 +459,7 @@ def bindings_from_catalog(catalog: Any | None) -> DataBindings:
         attribute_columns=user_cols,
         schema_override=dict(schema.get("user") or {}),
         queries=_parse_queries_block(user_cfg.get("queries")),
+        backend=str(user_cfg["backend"]) if user_cfg.get("backend") else None,
     )
     if user_from == "users" and not user_cols and data.get("user_table") is None:
         users.attrs_json_column = "attrs"
@@ -420,6 +474,7 @@ def bindings_from_catalog(catalog: Any | None) -> DataBindings:
         created_at_column=str(inter_cfg.get("created_at_column") or "created_at"),
         schema_override=dict(schema.get("interaction") or {}),
         queries=_parse_queries_block(inter_cfg.get("queries")),
+        backend=str(inter_cfg["backend"]) if inter_cfg.get("backend") else None,
     )
 
     emb_store = EmbeddingStoreBinding()
@@ -462,6 +517,7 @@ def bindings_from_catalog(catalog: Any | None) -> DataBindings:
             name_column=str(mstore.get("name_column") or "name"),
             blob_column=str(mstore.get("blob_column") or "blob"),
             feature_spec_column=str(mstore.get("feature_spec_column") or "feature_spec"),
+            backend=str(mstore["backend"]) if mstore.get("backend") else None,
         )
 
     pagination_kv = _pagination_kv_binding(catalog, data)
@@ -592,6 +648,7 @@ def _personal_filter_from_entry(entry: dict[str, Any]) -> PersonalFilterBinding 
         item_id_column=item_col,
         filter_type="personal_filter",
         queries=queries,
+        backend=str(entry["backend"]) if entry.get("backend") else None,
     )
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from importlib.metadata import entry_points
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from recql.catalog import EngineCatalog
@@ -61,3 +62,85 @@ async def open_connection(
             f"Registered connectors: {installed or ['(none)']}"
         )
     return await opener(dsn, catalog=catalog, **kwargs)
+
+
+async def open_engine(
+    engine_or_catalog: str | Path | dict[str, Any] | EngineCatalog,
+    *,
+    backend: str | None = None,
+    dsn: str | None = None,
+    **kwargs: Any,
+) -> tuple[PluginRegistry, Callable[[], Awaitable[None]]]:
+    """Open a single or multi-backend PluginRegistry and combined close function for an engine catalog."""
+    if isinstance(engine_or_catalog, EngineCatalog):
+        cat = engine_or_catalog
+    else:
+        from recql.catalog import load_engine_catalog
+
+        cat = load_engine_catalog(engine_or_catalog)
+
+    if cat.is_multi_backend():
+        registries: dict[str, PluginRegistry] = {}
+        closers: list[Callable[[], Awaitable[None]]] = []
+        for bname, bspec in cat.backends.items():
+            b_dsn = bspec.dsn or dsn
+            if not b_dsn:
+                raise ExecuteError(
+                    f"Backend {bname!r} in engine {cat.name!r} has no DSN configured."
+                )
+            merged_kw = {**bspec.options, **kwargs}
+            reg, closer = await open_connection(
+                b_dsn,
+                backend=bspec.backend,
+                catalog=cat,
+                **merged_kw,
+            )
+            registries[bname] = reg
+            if bspec.backend not in registries:
+                registries[bspec.backend] = reg
+            closers.append(closer)
+
+        from recql.plugins.composite import CompositePluginRegistry
+
+        default_b = next(iter(cat.backends.keys()))
+        composite_reg = CompositePluginRegistry(
+            registries=registries,
+            default_backend=default_b,
+        )
+
+        async def close_all() -> None:
+            for c in closers:
+                await c()
+
+        return composite_reg, close_all
+
+    b_name = backend or (
+        next(iter(cat.backends.values())).backend if cat.backends else None
+    )
+    if not b_name:
+        from recql.plugins.factory import plugin_backend_name
+
+        b_name = plugin_backend_name(cat)
+    if not b_name:
+        raise ExecuteError(f"No backend specified for engine {cat.name!r}.")
+
+    b_dsn = dsn or (
+        next(iter(cat.backends.values())).dsn if cat.backends else None
+    )
+    if not b_dsn:
+        dep = cat.deployment or {}
+        b_dsn = dep.get("dsn")
+    if not b_dsn:
+        raise ExecuteError(
+            f"No DSN specified for backend {b_name!r} in engine {cat.name!r}."
+        )
+
+    return await open_connection(b_dsn, backend=b_name, catalog=cat, **kwargs)
+
+
+__all__ = [
+    "Connector",
+    "open_connection",
+    "open_engine",
+    "resolve_connector",
+]
