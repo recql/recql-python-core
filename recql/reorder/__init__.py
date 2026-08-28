@@ -39,6 +39,25 @@ def _resolve_strength(step: Any, ctx: dict[str, Any], default: float = 0.5) -> f
     return float(raw)
 
 
+def _candidate_tokens(c: Candidate, attrs: list[str] | None = None) -> set[str]:
+    tokens = {c.id}
+    if attrs:
+        for k in attrs:
+            v = c.attributes.get(k)
+            if v is not None:
+                if isinstance(v, (list, tuple, set)):
+                    tokens.update(str(x) for x in v)
+                else:
+                    tokens.add(str(v))
+    else:
+        for v in c.attributes.values():
+            if isinstance(v, (list, tuple, set)):
+                tokens.update(str(x) for x in v)
+            else:
+                tokens.add(str(v))
+    return tokens
+
+
 class DiversityReorderer(Reorderer):
     """Greedy MMR-style reorder on attribute Jaccard / score blend."""
 
@@ -51,22 +70,41 @@ class DiversityReorderer(Reorderer):
         cap = int(getattr(step, "max_diversity_candidates", 1000) or 1000)
         head = rows[:cap]
         tail = rows[cap:]
+        if not head:
+            return rows
+
+        from recql.pyutils.jaccard import jaccard
+
+        attrs_raw = getattr(step, "diversity_attributes", None)
+        attrs = [str(a) for a in attrs_raw] if attrs_raw else None
+
+        cand_sets = [_candidate_tokens(c, attrs) for c in head]
+        n = len(head)
+        remaining_indices = list(range(n))
+        max_sim = [0.0] * n
         selected: list[Candidate] = []
-        remaining = list(head)
-        while remaining:
-            best_i = 0
+
+        while remaining_indices:
+            best_pos = 0
             best_score = float("-inf")
-            for i, cand in enumerate(remaining):
-                rel = float(cand.retrieval_score or 0.0)
-                if selected:
-                    sim = max(_jaccard(cand, s) for s in selected)
-                else:
-                    sim = 0.0
+            for pos, idx in enumerate(remaining_indices):
+                rel = float(head[idx].retrieval_score or 0.0)
+                sim = max_sim[idx]
                 mmr = (1.0 - strength) * rel - strength * sim
                 if mmr > best_score:
                     best_score = mmr
-                    best_i = i
-            selected.append(remaining.pop(best_i))
+                    best_pos = pos
+
+            chosen_idx = remaining_indices.pop(best_pos)
+            selected.append(head[chosen_idx])
+            chosen_set = cand_sets[chosen_idx]
+
+            # Incremental O(N) update of max similarities against latest chosen item
+            for idx in remaining_indices:
+                sim = jaccard(cand_sets[idx], chosen_set)
+                if sim > max_sim[idx]:
+                    max_sim[idx] = sim
+
         return selected + tail
 
 
