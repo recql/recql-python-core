@@ -29,7 +29,13 @@ def expand_env_vars(val: Any) -> Any:
             var_name = m.group(1)
             default_val = m.group(2) if m.group(2) is not None else ""
             return os.environ.get(var_name, default_val)
-        return _ENV_VAR_RE.sub(_repl, val)
+        res = val
+        for _ in range(5):
+            new_res = _ENV_VAR_RE.sub(_repl, res)
+            if new_res == res:
+                break
+            res = new_res
+        return res
     if isinstance(val, dict):
         return {k: expand_env_vars(v) for k, v in val.items()}
     if isinstance(val, list):

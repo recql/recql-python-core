@@ -367,7 +367,7 @@ def _table_from_config(cfg: dict[str, Any] | None, *, default_name: str) -> tupl
     return _quote_ident(str(name)), cfg
 
 
-def bindings_from_catalog(catalog: Any | None) -> DataBindings:
+def bindings_from_catalog(catalog: Any | None, *, backend: str | None = None) -> DataBindings:
     """Build DataBindings from engine YAML; fall back to fixture defaults."""
     from recql.catalog.query_templates import query_templates_from_catalog
     from recql.errors import ExecuteError
@@ -380,7 +380,7 @@ def bindings_from_catalog(catalog: Any | None) -> DataBindings:
         )
 
     plugins = getattr(catalog, "plugins", None) or {}
-    raw_backend = plugins.get("backend")
+    raw_backend = backend or plugins.get("backend")
     if not raw_backend:
         dep = getattr(catalog, "deployment", None) or {}
         raw_backend = dep.get("backend")
@@ -414,6 +414,23 @@ def bindings_from_catalog(catalog: Any | None) -> DataBindings:
     item_cols = _feature_columns(schema.get("item") or schema.get("items"))
     user_cols = _feature_columns(schema.get("user") or schema.get("users"))
 
+    # If binding is specifically resolved for a sub-backend in a multi-backend catalog,
+    # match default column names (like popular_rank_column) to that sub-backend's convention
+    # unless explicitly defined in data.<table_name> for that specific backend.
+    popular_rank_default = "_derived_popular_rank"
+    if backend in ("mariadb", "mysql"):
+        popular_rank_default = "derived_popular_rank"
+    elif backend in ("oracle",):
+        popular_rank_default = "derived_popular_rank"
+
+    item_popular_rank = item_cfg.get("popular_rank_column")
+    if not item_popular_rank:
+        item_popular_rank = popular_rank_default
+    elif backend in ("mariadb", "mysql") and item_popular_rank == "_derived_popular_rank":
+        item_popular_rank = "derived_popular_rank"
+    elif backend in ("oracle",) and item_popular_rank == "_derived_popular_rank":
+        item_popular_rank = "derived_popular_rank"
+
     items = EntityTableBinding(
         role="item",
         from_sql=item_from,
@@ -427,9 +444,7 @@ def bindings_from_catalog(catalog: Any | None) -> DataBindings:
         created_at_column=str(
             item_cfg.get("created_at_column") or "created_at"
         ),
-        popular_rank_column=str(
-            item_cfg.get("popular_rank_column") or "_derived_popular_rank"
-        ),
+        popular_rank_column=str(item_popular_rank),
         search_tsv_column=(
             str(item_cfg["search_tsv_column"])
             if item_cfg.get("search_tsv_column")
@@ -508,6 +523,39 @@ def bindings_from_catalog(catalog: Any | None) -> DataBindings:
                 embedding_store_map[str(emb_name)] = str(emb_name)
             elif "text" in embedding_stores:
                 embedding_store_map[str(emb_name)] = "text"
+
+    # If embedding_stores has not been explicitly configured in engine YAML, provide default stores
+    if not embedding_stores and backend:
+        embedding_stores["content_embedding"] = EmbeddingStoreGroup(
+            item=EmbeddingStoreBinding(
+                from_sql="text_embeddings",
+                name_column="embedding_name",
+                entity_type_column=None,
+                entity_id_column="entity_id",
+            )
+        )
+        embedding_stores["title_embedding"] = EmbeddingStoreGroup(
+            item=EmbeddingStoreBinding(
+                from_sql="text_embeddings",
+                name_column="embedding_name",
+                entity_type_column=None,
+                entity_id_column="entity_id",
+            )
+        )
+        embedding_stores["als"] = EmbeddingStoreGroup(
+            user=EmbeddingStoreBinding(
+                from_sql="als_user_embeddings",
+                name_column=None,
+                entity_type_column=None,
+                entity_id_column="user_id",
+            ),
+            item=EmbeddingStoreBinding(
+                from_sql="als_item_embeddings",
+                name_column=None,
+                entity_type_column=None,
+                entity_id_column="item_id",
+            ),
+        )
 
     model_store = ModelStoreBinding()
     mstore = index.get("model_store") or data.get("model_store")

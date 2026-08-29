@@ -393,9 +393,9 @@ def _lower_retrieve_call(call: A.FuncCall) -> dict[str, Any]:
 
 def _lower_score_call(call: A.FuncCall, *, alias: str | None, preserve_order: bool) -> dict[str, Any]:
     args = _arg_map(call)
-    value_model = args.get("expression") or args.get("value_model") or args.get("__pos_0")
+    value_model = args.get("expression") or args.get("value_model") or args.get("model") or args.get("__pos_0")
     if value_model is None:
-        raise ValidationError("score() requires expression / value_model")
+        raise ValidationError("score() requires expression / value_model / model")
     if isinstance(value_model, A.Literal) and value_model.kind == "string":
         vm = str(value_model.value)
     elif isinstance(value_model, A.Name):

@@ -86,7 +86,7 @@ def bindings_for_request(
     if req.bindings is not None:
         return req.bindings
     if req.catalog is not None:
-        return bindings_from_catalog(req.catalog)
+        return bindings_from_catalog(req.catalog, backend=default_backend)
     return default_fixture_bindings(backend=default_backend)
 
 
