@@ -36,23 +36,73 @@ class MockRetriever(Retriever):
 
     def __init__(
         self,
-        bags_by_name: dict[str, list[tuple[str, float]]],
+        bags_by_name: dict[str, list[tuple[str, float]]] | None = None,
         *,
         delay_by_name: dict[str, float] | None = None,
         supports_where: bool = True,
+        vectors: dict[tuple[str, str, str], list[float]] | dict[str, list[float]] | None = None,
+        interactions: dict[str, list[str]] | None = None,
     ) -> None:
-        self.bags_by_name = bags_by_name
+        self.bags_by_name = bags_by_name or {}
         self.delay_by_name = delay_by_name or {}
         self.supports_where = supports_where
+        self.vectors = vectors or {}
+        self.interactions = interactions or {}
+        self.last_query_vector: list[float] | None = None
 
     def supports_prefilter(self, expr: A.Expr | str | None) -> bool:
         if expr is None:
             return True
         return self.supports_where
 
+    async def lookup_vector(
+        self,
+        embedding_ref: str,
+        entity_type: str,
+        entity_id: str,
+        *,
+        req: RetrieveRequest | None = None,
+    ) -> list[float] | None:
+        # Check (embedding_ref, entity_type, entity_id) then entity_id
+        if (embedding_ref, entity_type, entity_id) in self.vectors:
+            return self.vectors[(embedding_ref, entity_type, entity_id)]
+        if entity_id in self.vectors:
+            return self.vectors[entity_id]
+        return None
+
+    async def lookup_vectors(
+        self,
+        embedding_ref: str,
+        entity_type: str,
+        entity_ids: list[str],
+        *,
+        req: RetrieveRequest | None = None,
+    ) -> dict[str, list[float]]:
+        out: dict[str, list[float]] = {}
+        for eid in entity_ids:
+            v = await self.lookup_vector(
+                embedding_ref, entity_type, eid, req=req
+            )
+            if v is not None:
+                out[eid] = v
+        return out
+
+    async def lookup_interactions(
+        self,
+        user_id: str,
+        limit: int = 10,
+        *,
+        req: RetrieveRequest | None = None,
+    ) -> list[str]:
+        items = self.interactions.get(user_id, [])
+        return items[:limit]
+
     async def retrieve(self, req: RetrieveRequest) -> RetrieveBag:
         step = req.step
         name = getattr(step, "name", None) or getattr(step, "type", "bag")
+        self.last_query_vector = getattr(step, "query_vector", None) or (
+            req.params.get("__query_vector__") if req.params else None
+        )
         where = getattr(step, "where", None)
         if where is not None and not self.supports_prefilter(where):
             raise ExecuteError(

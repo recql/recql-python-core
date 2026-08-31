@@ -53,6 +53,11 @@ class ItemAttributePoolingEncoder(msgspec.Struct, frozen=True, forbid_unknown_fi
     type: Literal["item_attribute_pooling"] = "item_attribute_pooling"
 
 
+class PrecomputedVectorEncoder(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
+    vector: list[float]
+    type: Literal["vector"] = "vector"
+
+
 QueryEncoder = Union[
     InteractionPoolingEncoder,
     InteractionRoundRobinEncoder,
@@ -60,6 +65,7 @@ QueryEncoder = Union[
     PrecomputedUserEmbedding,
     ItemAttributePoolingEncoder,
     PrecomputedItemEmbedding,
+    PrecomputedVectorEncoder,
 ]
 
 _ENCODER_BY_TYPE: dict[str, type] = {
@@ -69,6 +75,7 @@ _ENCODER_BY_TYPE: dict[str, type] = {
     "interaction_round_robin": InteractionRoundRobinEncoder,
     "user_attribute_pooling": UserAttributePoolingEncoder,
     "item_attribute_pooling": ItemAttributePoolingEncoder,
+    "vector": PrecomputedVectorEncoder,
 }
 
 
@@ -118,6 +125,7 @@ class SimilarityRetrieveStep(msgspec.Struct, frozen=True, forbid_unknown_fields=
     limit: int = 100
     name: str | None = None
     backend: str | None = None
+    query_vector: list[float] | None = None
     type: Literal["similarity"] = "similarity"
     use_exact_search: bool = False
 

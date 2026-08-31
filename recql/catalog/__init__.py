@@ -97,14 +97,18 @@ class EngineCatalog:
     def model(self, name: str) -> ModelSpec | None:
         return self.models.get(name)
 
-    def backend_for_embedding(self, name: str) -> str | None:
+    def backend_for_embedding(self, name: str, entity_type: str = "item") -> str | None:
+        stores = (self.raw.get("index") or {}).get("embedding_stores") or {}
+        st = stores.get(name)
+        if isinstance(st, dict):
+            plane = st.get(entity_type)
+            if isinstance(plane, dict) and plane.get("backend"):
+                return str(plane["backend"])
+            if st.get("backend"):
+                return str(st["backend"])
         emb = self.embeddings.get(name)
         if emb and emb.backend:
             return emb.backend
-        stores = (self.raw.get("index") or {}).get("embedding_stores") or {}
-        st = stores.get(name)
-        if isinstance(st, dict) and st.get("backend"):
-            return str(st["backend"])
         if len(self.backends) == 1:
             return next(iter(self.backends.keys()))
         return None
@@ -219,6 +223,24 @@ def load_engine_catalog(source: str | Path | dict[str, Any]) -> EngineCatalog:
                 backend=(str(emb["backend"]) if emb.get("backend") else None),
                 raw=emb,
             )
+
+    stores_cfg = index.get("embedding_stores") or {}
+    if isinstance(stores_cfg, dict):
+        for sname, scfg in stores_cfg.items():
+            if str(sname) not in cat.embeddings:
+                b_name = None
+                if isinstance(scfg, dict):
+                    b_name = scfg.get("backend") or (
+                        scfg.get("item", {}).get("backend")
+                        if isinstance(scfg.get("item"), dict)
+                        else None
+                    )
+                cat.embeddings[str(sname)] = EmbeddingSpec(
+                    name=str(sname),
+                    dims=scfg.get("dims") if isinstance(scfg, dict) else None,
+                    backend=str(b_name) if b_name else None,
+                    raw=scfg if isinstance(scfg, dict) else {},
+                )
 
     lex = index.get("lexical_search")
     if isinstance(lex, dict):

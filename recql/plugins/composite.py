@@ -123,7 +123,7 @@ class RoutedSimilarityRetriever(RoutedRetriever):
         emb_ref = getattr(step, "embedding_ref", None)
         if emb_ref:
             if req.catalog is not None:
-                b = req.catalog.backend_for_embedding(str(emb_ref))
+                b = req.catalog.backend_for_embedding(str(emb_ref), req.entity_type)
                 if b:
                     return b
             if req.bindings is not None:
@@ -131,6 +131,185 @@ class RoutedSimilarityRetriever(RoutedRetriever):
                 if b:
                     return b
         return self.default_backend
+
+    async def lookup_vector(
+        self,
+        embedding_ref: str,
+        entity_type: str,
+        entity_id: str,
+        *,
+        req: RetrieveRequest | None = None,
+    ) -> list[float] | None:
+        target = self.default_backend
+        if req and req.catalog:
+            target = req.catalog.backend_for_embedding(embedding_ref, entity_type) or target
+        elif req and req.bindings:
+            target = req.bindings.backend_for_embedding(embedding_ref, entity_type) or target
+        reg = self.resolve_registry(target)
+        ret = reg.get_retriever(self.retriever_type)
+        return await ret.lookup_vector(embedding_ref, entity_type, entity_id, req=req)
+
+    async def lookup_vectors(
+        self,
+        embedding_ref: str,
+        entity_type: str,
+        entity_ids: list[str],
+        *,
+        req: RetrieveRequest | None = None,
+    ) -> dict[str, list[float]]:
+        target = self.default_backend
+        if req and req.catalog:
+            target = req.catalog.backend_for_embedding(embedding_ref, entity_type) or target
+        elif req and req.bindings:
+            target = req.bindings.backend_for_embedding(embedding_ref, entity_type) or target
+        reg = self.resolve_registry(target)
+        ret = reg.get_retriever(self.retriever_type)
+        return await ret.lookup_vectors(embedding_ref, entity_type, entity_ids, req=req)
+
+    async def lookup_interactions(
+        self,
+        user_id: str,
+        limit: int = 10,
+        *,
+        req: RetrieveRequest | None = None,
+    ) -> list[str]:
+        target = self.default_backend
+        if req and req.catalog:
+            target = req.catalog.backend_for_entity("interaction") or target
+        elif req and req.bindings and req.bindings.interactions:
+            target = req.bindings.interactions.backend or target
+        reg = self.resolve_registry(target)
+        ret = reg.get_retriever(self.retriever_type)
+        return await ret.lookup_interactions(user_id, limit=limit, req=req)
+
+    async def retrieve(self, req: RetrieveRequest) -> RetrieveBag:
+        step = req.step
+        emb_ref = getattr(step, "embedding_ref", None) or "als"
+        enc = getattr(step, "query_encoder", None)
+        etype = getattr(enc, "type", None) if enc is not None else None
+
+        # Check for precomputed / explicit query vector
+        qvec = getattr(step, "query_vector", None)
+        if qvec is None and etype == "vector":
+            qvec = getattr(enc, "vector", None)
+
+        target = self.target_for_request(req)
+        target_reg = self.resolve_registry(target)
+
+        # If vector already present or no encoder, delegate directly
+        if qvec is not None or enc is None:
+            retriever = target_reg.get_retriever(self.retriever_type)
+            return await retriever.retrieve(req)
+
+        # Determine source backends for encoder inputs
+        user_target = target
+        item_src_target = target
+        inter_target = target
+
+        cat = req.catalog
+        bindings = req.bindings
+
+        if cat is not None:
+            user_b = cat.backend_for_embedding(str(emb_ref), "user")
+            if user_b:
+                user_target = user_b
+            item_src_b = cat.backend_for_embedding(str(emb_ref), "item")
+            if item_src_b:
+                item_src_target = item_src_b
+            inter_b = cat.backend_for_entity("interaction")
+            if inter_b:
+                inter_target = inter_b
+
+        if bindings is not None:
+            b_u = bindings.backend_for_embedding(str(emb_ref), "user")
+            if b_u:
+                user_target = b_u
+            b_i = bindings.backend_for_embedding(str(emb_ref), "item")
+            if b_i:
+                item_src_target = b_i
+            if bindings.interactions and bindings.interactions.backend:
+                inter_target = bindings.interactions.backend
+
+        is_split = False
+        if etype == "precomputed_user" and self._resolve_backend_name(user_target) != self._resolve_backend_name(target):
+            is_split = True
+        elif etype == "precomputed_item" and self._resolve_backend_name(item_src_target) != self._resolve_backend_name(target):
+            is_split = True
+        elif etype == "interaction_pooling" and (
+            self._resolve_backend_name(inter_target) != self._resolve_backend_name(target)
+            or self._resolve_backend_name(item_src_target) != self._resolve_backend_name(target)
+        ):
+            is_split = True
+
+        if not is_split:
+            retriever = target_reg.get_retriever(self.retriever_type)
+            return await retriever.retrieve(req)
+
+        # Resolve cross-backend vector
+        from recql.encode.pooling import pool_vectors
+
+        def _resolve_val(v: Any) -> str:
+            val = str(v or "")
+            if val.startswith("$"):
+                return str((req.params or {}).get(val[1:], val))
+            return val
+
+        resolved_vec: list[float] | None = None
+
+        if etype == "precomputed_user":
+            user_reg = self.resolve_registry(user_target)
+            sim_ret = user_reg.get_retriever(self.retriever_type)
+            uid = _resolve_val(getattr(enc, "input_user_id", ""))
+            resolved_vec = await sim_ret.lookup_vector(str(emb_ref), "user", uid, req=req)
+
+        elif etype == "precomputed_item":
+            item_reg = self.resolve_registry(item_src_target)
+            sim_ret = item_reg.get_retriever(self.retriever_type)
+            iid = _resolve_val(getattr(enc, "input_item_id", ""))
+            resolved_vec = await sim_ret.lookup_vector(str(emb_ref), "item", iid, req=req)
+
+        elif etype == "interaction_pooling":
+            inter_reg = self.resolve_registry(inter_target)
+            sim_inter = inter_reg.get_retriever(self.retriever_type)
+            uid = _resolve_val(getattr(enc, "input_user_id", ""))
+            trunc = int(getattr(enc, "truncate_interactions", 10) or 10)
+            item_ids = await sim_inter.lookup_interactions(uid, limit=trunc, req=req)
+            if not item_ids:
+                return RetrieveBag(name=str(getattr(step, "name", "similarity") or "similarity"), candidates=[])
+
+            item_reg = self.resolve_registry(item_src_target)
+            sim_item = item_reg.get_retriever(self.retriever_type)
+            item_vecs_map = await sim_item.lookup_vectors(str(emb_ref), "item", item_ids, req=req)
+            if not item_vecs_map:
+                return RetrieveBag(name=str(getattr(step, "name", "similarity") or "similarity"), candidates=[])
+
+            vecs_list = [item_vecs_map[iid] for iid in item_ids if iid in item_vecs_map]
+            if not vecs_list:
+                return RetrieveBag(name=str(getattr(step, "name", "similarity") or "similarity"), candidates=[])
+
+            p_func = str(getattr(enc, "pooling_function", "mean") or "mean")
+            resolved_vec = pool_vectors(vecs_list, pooling_function=p_func)
+
+        if not resolved_vec:
+            return RetrieveBag(name=str(getattr(step, "name", "similarity") or "similarity"), candidates=[])
+
+        import copy
+        new_step = copy.copy(step)
+        if hasattr(new_step, "__struct_fields__") or hasattr(new_step, "__dataclass_fields__"):
+            object.__setattr__(new_step, "query_vector", resolved_vec)
+        else:
+            setattr(new_step, "query_vector", resolved_vec)
+
+        delegated_req = RetrieveRequest(
+            step=new_step,
+            params={**(req.params or {}), "__query_vector__": resolved_vec},
+            entity_type=req.entity_type,
+            prefilter=req.prefilter,
+            bindings=target_reg._recql_bindings if hasattr(target_reg, "_recql_bindings") else req.bindings,
+            catalog=req.catalog,
+        )
+        retriever = target_reg.get_retriever(self.retriever_type)
+        return await retriever.retrieve(delegated_req)
 
 
 class RoutedTextSearchRetriever(RoutedRetriever):

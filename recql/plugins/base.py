@@ -28,6 +28,45 @@ class Retriever(ABC):
     def supports_prefilter(self, expr: A.Expr | str | None) -> bool:
         return expr is None
 
+    async def lookup_vector(
+        self,
+        embedding_ref: str,
+        entity_type: str,
+        entity_id: str,
+        *,
+        req: RetrieveRequest | None = None,
+    ) -> list[float] | None:
+        """Lookup an embedding vector for a specific entity."""
+        return None
+
+    async def lookup_vectors(
+        self,
+        embedding_ref: str,
+        entity_type: str,
+        entity_ids: list[str],
+        *,
+        req: RetrieveRequest | None = None,
+    ) -> dict[str, list[float]]:
+        """Lookup embedding vectors for multiple entities."""
+        out: dict[str, list[float]] = {}
+        for eid in entity_ids:
+            v = await self.lookup_vector(
+                embedding_ref, entity_type, eid, req=req
+            )
+            if v is not None:
+                out[eid] = v
+        return out
+
+    async def lookup_interactions(
+        self,
+        user_id: str,
+        limit: int = 10,
+        *,
+        req: RetrieveRequest | None = None,
+    ) -> list[str]:
+        """Lookup recent interaction item IDs for a user."""
+        return []
+
 
 class Scorer(ABC):
     @abstractmethod

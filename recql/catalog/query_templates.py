@@ -135,8 +135,12 @@ class QueryRenderer:
     def entity_structural(self, entity: EntityTableBinding) -> dict[str, str]:
         return {
             "item_from": entity.from_sql,
+            "interaction_from": entity.from_sql,
             "item_select": self.dialect.select_entity_columns(entity, alias="e"),
             "id_column": entity.id_column,
+            "item_id_column": entity.item_id_column or entity.id_column,
+            "user_id_column": entity.user_id_column or "user_id",
+            "created_at_column": entity.created_at_column or "created_at",
             "search_tsv_column": entity.search_tsv_column or "search_tsv",
             "search_text_column": str(
                 (entity.schema_override or {}).get("search_text_column") or "search_text"

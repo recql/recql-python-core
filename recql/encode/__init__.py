@@ -22,6 +22,9 @@ if TYPE_CHECKING:
     from recql.catalog import EngineCatalog
 
 
+from recql.encode.pooling import pool_vectors
+
+
 def fake_embedding(text: str, dims: int = 8) -> list[float]:
     vec: list[float] = []
     for i in range(dims):
@@ -271,6 +274,7 @@ __all__ = [
     "encode_query",
     "fake_embedding",
     "get_encoder",
+    "pool_vectors",
     "vector_literal",
     "warm_encoders_for_catalog",
 ]

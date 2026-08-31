@@ -14,6 +14,25 @@ class MockNamedRetriever(Retriever):
         self.canned_results = canned_results
         self.calls: list[str] = []
 
+    async def lookup_vector(
+        self,
+        embedding_ref: str,
+        entity_type: str,
+        entity_id: str,
+        *,
+        req: RetrieveRequest | None = None,
+    ) -> list[float] | None:
+        return [0.1] * 8
+
+    async def lookup_interactions(
+        self,
+        user_id: str,
+        limit: int = 10,
+        *,
+        req: RetrieveRequest | None = None,
+    ) -> list[str]:
+        return ["item_1", "item_2"][:limit]
+
     async def retrieve(self, req: RetrieveRequest) -> RetrieveBag:
         step = req.step
         emb = getattr(step, "embedding_ref", None)
